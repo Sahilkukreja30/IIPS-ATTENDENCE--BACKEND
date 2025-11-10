@@ -434,14 +434,16 @@ exports.submitAttendance = async (req, res) => {
                   records: {
                     date: new Date(date),
                     present: r.present,
-                    markedBy: teacherName, // ✅ store per record
+                    markedBy: teacherName,// ✅ store per record
+                    markedAt: new Date(),// ✅ timestamp for each record
+                   
                   },
                 },
               },
             },
           }))
       );
-
+    console.log('Attendance Ops:', Date.now());
     if (attendanceOps.length > 0) {
       await Attendance.bulkWrite(attendanceOps, { session });
     }
@@ -1209,6 +1211,221 @@ exports.markSingleAttendance = async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error marking attendance:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+// Get attendances marked by a specific teacher
+exports.getTeacherMarkedAttendances = async (req, res) => {
+  try {
+  
+    const { teacherId } = req.params;
+
+    if (!teacherId) {
+      return res.status(400).json({ message: "teacherId is required" });
+    }
+
+    // 1️⃣ Get teacher info
+    const teacher = await Teacher.findById(teacherId).lean();
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    // 2️⃣ Check subject access
+    const hasAllAccess = teacher.subjectAccess.some(s => s.subjectCode === "all");
+    const allowedSubjects = teacher.subjectAccess.map(s => s.subjectCode);
+
+  
+
+    // 3️⃣ Build subject filter (if no 'all' access)
+    let matchStage = {};
+    if (!hasAllAccess) {
+      matchStage.subjectCode = { $in: allowedSubjects };
+    }
+
+    // 4️⃣ Aggregate attendance records
+    const records = await Attendance.aggregate([
+      { $match: matchStage },
+      { $unwind: "$records" },
+      {
+        $match: hasAllAccess
+          ? {} // can view everything
+          : { "records.markedBy": teacher.name }, // match by teacher name
+      },
+      {
+        $group: {
+          _id: {
+            subjectCode: "$subjectCode",
+            date: "$records.date",
+          },
+          totalStudents: { $sum: 1 },
+          presentCount: {
+            $sum: { $cond: [{ $eq: ["$records.present", true] }, 1, 0] },
+          },
+          absentCount: {
+            $sum: { $cond: [{ $eq: ["$records.present", false] }, 1, 0] },
+          },
+          markedAt: { $first: "$records.markedAt" },
+          markedBy: { $first: "$records.markedBy" },
+        },
+      },
+      // 5️⃣ Lookup subject details
+      {
+        $lookup: {
+          from: "subjects",
+          localField: "_id.subjectCode",
+          foreignField: "Sub_Code",
+          as: "subjectInfo",
+        },
+      },
+      { $unwind: { path: "$subjectInfo", preserveNullAndEmptyArrays: true } },
+      // 6️⃣ Lookup course details
+      {
+        $lookup: {
+          from: "courses",
+          localField: "subjectInfo.Course_ID",
+          foreignField: "Course_ID",
+          as: "courseInfo",
+        },
+      },
+      { $unwind: { path: "$courseInfo", preserveNullAndEmptyArrays: true } },
+      // 7️⃣ Project final output
+      {
+        $project: {
+          _id: 0,
+          subjectCode: "$_id.subjectCode",
+          subjectName: "$subjectInfo.Sub_Name",
+          courseId: "$subjectInfo.Course_ID",
+          courseName: "$courseInfo.Course_Name",
+          semId: "$subjectInfo.Sem_Id",
+          date: "$_id.date",
+          presentCount: 1,
+          absentCount: 1,
+          totalStudents: 1,
+          markedAt: 1,
+          markedBy: 1,
+        },
+      },
+      { $sort: { date: -1 } },
+    ]);
+
+   
+    // 8️⃣ Add canUpdate flag (within 1 hour)
+    const now = new Date();
+    const enhanced = records.map(r => {
+      const diffMs = now - new Date(r.markedAt);
+      const canUpdate = diffMs <= 6 * 60 * 60 * 1000; // 6 hour window
+      return { ...r, canUpdate };
+    });
+
+    // 9️⃣ Send response
+    return res.status(200).json({
+      teacher: teacher.name,
+      hasAllAccess,
+      attendances: enhanced,
+    });
+  } catch (error) {
+    console.error("Error fetching teacher marked attendances:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+// Fetch students for updating attendance
+exports.fetchStudentsForUpdate = async (req, res) => {
+  try {
+    const { subjectCode, date } = req.params;
+    console.log('Fetch students for update:', { subjectCode, date });
+
+    if (!subjectCode || !date) {
+      return res.status(400).json({ message: "subjectCode and date are required" });
+    }
+
+   const inputDate = new Date(date);
+const startOfDay = new Date(inputDate);
+startOfDay.setUTCHours(0, 0, 0, 0);
+const endOfDay = new Date(inputDate);
+endOfDay.setUTCHours(23, 59, 59, 999);
+
+const docs = await Attendance.find({
+  subjectCode,
+  records: {
+    $elemMatch: { date: { $gte: startOfDay, $lte: endOfDay } } // add session: sessionId if needed
+  }
+}).populate("studentId", "name rollNo");
+
+const students = docs.map(doc => {
+  // find the specific record inside the array (if multiple exist you'll get the first — adjust as needed)
+  const matchingRecord = doc.records.find(r => (r.date >= startOfDay && r.date <= endOfDay));
+  return {
+    studentId: doc.studentId._id,
+    name: doc.studentId.name,
+    rollNo: doc.studentId.rollNo,
+    present: matchingRecord ? matchingRecord.present : null,
+
+  };
+});
+
+
+    console.log('Fetched records for update:', students.length);
+    return res.status(200).json({ students });
+
+  } catch (error) {
+    console.error("Error fetching students for update:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Update attendance records
+exports.updateAttendance = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { teacherId, subjectCode, date, updates } = req.body;
+
+    if (!teacherId || !subjectCode || !date || !updates) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const dateObj = new Date(date);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    // 1️⃣ Check if attendance was marked within the last hour
+    const latestRecord = await Attendance.findOne({
+      subjectCode,
+      "records.date": dateObj,
+      "records.markedBy": teacherId,
+    }).lean();
+
+    if (!latestRecord) {
+      return res.status(404).json({ message: "No attendance found for update" });
+    }
+
+    const recordDate = latestRecord.records.find(
+      r => r.date.toISOString() === dateObj.toISOString() && r.markedBy === teacherId
+    )?.date;
+
+    if (!recordDate || recordDate < oneHourAgo) {
+      return res.status(403).json({ message: "Update window expired (1 hour limit)" });
+    }
+
+    // 2️⃣ Update attendance records for provided students
+    for (const upd of updates) {
+      await Attendance.updateOne(
+        { studentId: upd.studentId, subjectCode, "records.date": dateObj },
+        { $set: { "records.$.present": upd.present } },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({ message: "Attendance updated successfully" });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error updating attendance:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };

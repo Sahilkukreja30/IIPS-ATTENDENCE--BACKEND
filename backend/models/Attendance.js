@@ -14,7 +14,8 @@ const attendanceSchema = new mongoose.Schema({
     {
       date: { type: Date, required: true },
       present: { type: Boolean, required: true },
-      markedBy: { type: String, default: null } // now at record level
+      markedBy: { type: String, default: null }, // now at record level
+      markedAt: { type: Date, default: Date.now } // timestamp for each record
     }
   ]
 }, { timestamps: true });
