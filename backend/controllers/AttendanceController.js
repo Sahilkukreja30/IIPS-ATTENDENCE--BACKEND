@@ -436,7 +436,7 @@ exports.submitAttendance = async (req, res) => {
                     present: r.present,
                     markedBy: teacherName,// ✅ store per record
                     markedAt: new Date(),// ✅ timestamp for each record
-                   
+
                   },
                 },
               },
@@ -629,7 +629,7 @@ exports.getStudentAttendanceDetail = async (req, res) => {
       .map(record => ({
         date: record.date,
         present: record.present,
-        markedBy: record.markedBy || "-"   
+        markedBy: record.markedBy || "-"
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -637,38 +637,38 @@ exports.getStudentAttendanceDetail = async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching student attendance details:', error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Server error',
       error: error.message
     });
   }
 };
 
-  
-  // Get student information
-  exports.getStudentById = async (req, res) => {
-    try {
-      const { id } = req.params;
-      
-      const student = await Student.findById(id).select('-password'); // Exclude password
-      
-      if (!student) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-      
-      return res.status(200).json(student);
-    } catch (error) {
-      console.error('Error fetching student information:', error);
-      return res.status(500).json({ message: 'Server error' });
+
+// Get student information
+exports.getStudentById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const student = await Student.findById(id).select('-password'); // Exclude password
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
     }
-  };
+
+    return res.status(200).json(student);
+  } catch (error) {
+    console.error('Error fetching student information:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
 
 // Controller to send low attendance notifications
 // Controller to send low attendance notifications
 exports.sendLowAttendanceNotifications = async (req, res) => {
   try {
     const { attendanceSummary, threshold } = req.body;
-    
+
     if (!attendanceSummary || !threshold) {
       return res.status(400).json({ message: 'Missing required data' });
     }
@@ -680,9 +680,9 @@ exports.sendLowAttendanceNotifications = async (req, res) => {
     });
 
     if (lowAttendanceStudents.length === 0) {
-      return res.status(200).json({ 
-        message: 'No students found below the threshold', 
-        sentCount: 0 
+      return res.status(200).json({
+        message: 'No students found below the threshold',
+        sentCount: 0
       });
     }
 
@@ -742,43 +742,43 @@ exports.sendLowAttendanceNotifications = async (req, res) => {
   }
 };
 
-  
-  // Calculate how many consecutive classes a student needs to attend to reach the threshold
-  function calculateClassesNeeded(present, total, threshold) {
-    const currentPercentage = (present / total) * 100;
-    
-    if (currentPercentage >= threshold) return 0;
-    
-    let additionalClasses = 0;
-    let newTotal = total;
-    let newPresent = present;
-    
-    while ((newPresent / newTotal) * 100 < threshold) {
-      additionalClasses++;
-      newPresent++;
-      newTotal++;
-    }
-    
-    return additionalClasses;
+
+// Calculate how many consecutive classes a student needs to attend to reach the threshold
+function calculateClassesNeeded(present, total, threshold) {
+  const currentPercentage = (present / total) * 100;
+
+  if (currentPercentage >= threshold) return 0;
+
+  let additionalClasses = 0;
+  let newTotal = total;
+  let newPresent = present;
+
+  while ((newPresent / newTotal) * 100 < threshold) {
+    additionalClasses++;
+    newPresent++;
+    newTotal++;
   }
-  
-  // Function to send the low attendance email
-  async function sendLowAttendanceEmail(
-    email, 
-    studentName, 
-    rollNumber, 
-    subject, 
-    currentPercentage, 
-    threshold, 
-    gap, 
-    present, 
-    total,
-    classesNeeded
-  ) {
-    // Format the email with HTML for better readability
-    const emailSubject = `⚠️ IMPORTANT: Low Attendance Warning for ${subject}`;
-    
-    const emailHtml = `
+
+  return additionalClasses;
+}
+
+// Function to send the low attendance email
+async function sendLowAttendanceEmail(
+  email,
+  studentName,
+  rollNumber,
+  subject,
+  currentPercentage,
+  threshold,
+  gap,
+  present,
+  total,
+  classesNeeded
+) {
+  // Format the email with HTML for better readability
+  const emailSubject = `⚠️ IMPORTANT: Low Attendance Warning for ${subject}`;
+
+  const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
         <div style="background-color: #f8d7da; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 5px solid #dc3545;">
           <h2 style="color: #721c24; margin-top: 0;">Low Attendance Alert</h2>
@@ -816,19 +816,19 @@ exports.sendLowAttendanceNotifications = async (req, res) => {
         </div>
       </div>
     `;
-    
-    try {
-      await emailService.sendAttendanceEmail(
-        email,
-        emailSubject,
-        emailHtml
-      );
-      return true;
-    } catch (error) {
-      console.error('Error sending attendance email:', error);
-      throw error;
-    }
+
+  try {
+    await emailService.sendAttendanceEmail(
+      email,
+      emailSubject,
+      emailHtml
+    );
+    return true;
+  } catch (error) {
+    console.error('Error sending attendance email:', error);
+    throw error;
   }
+}
 
 // delete attendance (optimized)
 exports.deleteAttendance = async (req, res) => {
@@ -1217,7 +1217,7 @@ exports.markSingleAttendance = async (req, res) => {
 // Get attendances marked by a specific teacher
 exports.getTeacherMarkedAttendances = async (req, res) => {
   try {
-  
+
     const { teacherId } = req.params;
 
     if (!teacherId) {
@@ -1234,7 +1234,7 @@ exports.getTeacherMarkedAttendances = async (req, res) => {
     const hasAllAccess = teacher.subjectAccess.some(s => s.subjectCode === "all");
     const allowedSubjects = teacher.subjectAccess.map(s => s.subjectCode);
 
-  
+
 
     // 3️⃣ Build subject filter (if no 'all' access)
     let matchStage = {};
@@ -1308,7 +1308,7 @@ exports.getTeacherMarkedAttendances = async (req, res) => {
       { $sort: { date: -1 } },
     ]);
 
-   
+
     // 8️⃣ Add canUpdate flag (within 1 hour)
     const now = new Date();
     const enhanced = records.map(r => {
@@ -1340,30 +1340,29 @@ exports.fetchStudentsForUpdate = async (req, res) => {
       return res.status(400).json({ message: "subjectCode and date are required" });
     }
 
-   const inputDate = new Date(date);
-const startOfDay = new Date(inputDate);
-startOfDay.setUTCHours(0, 0, 0, 0);
-const endOfDay = new Date(inputDate);
-endOfDay.setUTCHours(23, 59, 59, 999);
+    const inputDate = new Date(date);
+    const startOfDay = new Date(inputDate);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const endOfDay = new Date(inputDate);
+    endOfDay.setUTCHours(23, 59, 59, 999);
 
-const docs = await Attendance.find({
-  subjectCode,
-  records: {
-    $elemMatch: { date: { $gte: startOfDay, $lte: endOfDay } } // add session: sessionId if needed
-  }
-}).populate("studentId", "name rollNo");
+    const docs = await Attendance.find({
+      subjectCode,
+      records: {
+        $elemMatch: { date: { $gte: startOfDay, $lte: endOfDay } } // add session: sessionId if needed
+      }
+    }).populate("studentId", "fullName rollNumber");
 
-const students = docs.map(doc => {
-  // find the specific record inside the array (if multiple exist you'll get the first — adjust as needed)
-  const matchingRecord = doc.records.find(r => (r.date >= startOfDay && r.date <= endOfDay));
-  return {
-    studentId: doc.studentId._id,
-    name: doc.studentId.name,
-    rollNo: doc.studentId.rollNo,
-    present: matchingRecord ? matchingRecord.present : null,
-
-  };
-});
+    const students = docs.map(doc => {
+      // find the specific record inside the array (if multiple exist you'll get the first — adjust as needed)
+      const matchingRecord = doc.records.find(r => (r.date >= startOfDay && r.date <= endOfDay));
+      return {
+        studentId: doc.studentId._id,
+        fullName: doc.studentId.fullName,
+        rollNumber: doc.studentId.rollNumber,
+        present: matchingRecord ? matchingRecord.present : null,
+      };
+    });
 
 
     console.log('Fetched records for update:', students.length);
