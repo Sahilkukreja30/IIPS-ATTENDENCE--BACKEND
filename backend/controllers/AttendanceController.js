@@ -1179,7 +1179,7 @@ exports.markSingleAttendance = async (req, res) => {
       );
     }
 
-    // 3️⃣ Update AttendanceSummary (only attendedClasses, not totalClasses)
+    // 3️ Update AttendanceSummary (only attendedClasses, not totalClasses)
     await AttendanceSummary.updateOne(
       {
         studentId,
