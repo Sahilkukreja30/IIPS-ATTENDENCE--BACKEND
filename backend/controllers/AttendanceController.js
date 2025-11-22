@@ -1215,80 +1215,65 @@ exports.markSingleAttendance = async (req, res) => {
   }
 };
 // Get attendances marked by a specific teacher
+// paste/replace this in AttendanceController.js (replace existing getTeacherMarkedAttendances)
 exports.getTeacherMarkedAttendances = async (req, res) => {
   try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 12;
+    const skip = (page - 1) * limit;
 
     const { teacherId } = req.params;
+    if (!teacherId) return res.status(400).json({ message: "teacherId is required" });
 
-    if (!teacherId) {
-      return res.status(400).json({ message: "teacherId is required" });
-    }
-
-    // 1️⃣ Get teacher info
     const teacher = await Teacher.findById(teacherId).lean();
-    if (!teacher) {
-      return res.status(404).json({ message: "Teacher not found" });
-    }
+    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
 
-    // 2️⃣ Check subject access
     const hasAllAccess = teacher.subjectAccess.some(s => s.subjectCode === "all");
     const allowedSubjects = teacher.subjectAccess.map(s => s.subjectCode);
 
-
-
-    // 3️⃣ Build subject filter (if no 'all' access)
-    let matchStage = {};
+    // Build initial match stage (filter by subjectCode if teacher doesn't have all access)
+    const initialMatch = {};
     if (!hasAllAccess) {
-      matchStage.subjectCode = { $in: allowedSubjects };
+      initialMatch.subjectCode = { $in: allowedSubjects };
     }
 
-    // 4️⃣ Aggregate attendance records
-    const records = await Attendance.aggregate([
-      { $match: matchStage },
+    // We want to group by subjectCode + date (same as before) and then sort by date desc.
+    const basePipeline = [
+      { $match: initialMatch },
       { $unwind: "$records" },
       {
         $match: hasAllAccess
-          ? {} // can view everything
-          : { "records.markedBy": teacher.name }, // match by teacher name
+          ? {} // no-op match
+          : { "records.markedBy": teacher.name }
       },
       {
         $group: {
-          _id: {
-            subjectCode: "$subjectCode",
-            date: "$records.date",
-          },
+          _id: { subjectCode: "$subjectCode", date: "$records.date" },
           totalStudents: { $sum: 1 },
-          presentCount: {
-            $sum: { $cond: [{ $eq: ["$records.present", true] }, 1, 0] },
-          },
-          absentCount: {
-            $sum: { $cond: [{ $eq: ["$records.present", false] }, 1, 0] },
-          },
+          presentCount: { $sum: { $cond: [{ $eq: ["$records.present", true] }, 1, 0] } },
+          absentCount: { $sum: { $cond: [{ $eq: ["$records.present", false] }, 1, 0] } },
           markedAt: { $first: "$records.markedAt" },
           markedBy: { $first: "$records.markedBy" },
-        },
+        }
       },
-      // 5️⃣ Lookup subject details
       {
         $lookup: {
           from: "subjects",
           localField: "_id.subjectCode",
           foreignField: "Sub_Code",
-          as: "subjectInfo",
-        },
+          as: "subjectInfo"
+        }
       },
       { $unwind: { path: "$subjectInfo", preserveNullAndEmptyArrays: true } },
-      // 6️⃣ Lookup course details
       {
         $lookup: {
           from: "courses",
           localField: "subjectInfo.Course_ID",
           foreignField: "Course_ID",
-          as: "courseInfo",
-        },
+          as: "courseInfo"
+        }
       },
       { $unwind: { path: "$courseInfo", preserveNullAndEmptyArrays: true } },
-      // 7️⃣ Project final output
       {
         $project: {
           _id: 0,
@@ -1302,32 +1287,55 @@ exports.getTeacherMarkedAttendances = async (req, res) => {
           absentCount: 1,
           totalStudents: 1,
           markedAt: 1,
-          markedBy: 1,
-        },
+          markedBy: 1
+        }
       },
-      { $sort: { date: -1 } },
-    ]);
+      { $sort: { date: -1, markedAt: -1 } }
+    ];
 
+    // Use facet to get both paginated results and total count in one DB call
+    const facetPipeline = [
+      {
+        $facet: {
+          paginatedResults: [
+            { $skip: skip },
+            { $limit: limit }
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
+        }
+      }
+    ];
 
-    // 8️⃣ Add canUpdate flag (within 1 hour)
+    const agg = await Attendance.aggregate([...basePipeline, ...facetPipeline]);
+
+    const paginated = (agg[0] && agg[0].paginatedResults) || [];
+    const totalCount = (agg[0] && agg[0].totalCount && agg[0].totalCount[0] && agg[0].totalCount[0].count) || 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
     const now = new Date();
-    const enhanced = records.map(r => {
+    const enhanced = paginated.map(r => {
       const diffMs = now - new Date(r.markedAt);
-      const canUpdate = diffMs <= 6 * 60 * 60 * 1000; // 6 hour window
+      const canUpdate = diffMs <= 6 * 60 * 60 * 1000 * 24; // 6 hour window
       return { ...r, canUpdate };
     });
 
-    // 9️⃣ Send response
     return res.status(200).json({
       teacher: teacher.name,
       hasAllAccess,
       attendances: enhanced,
+      page,
+      totalPages,
+      totalCount,
+      limit
     });
   } catch (error) {
     console.error("Error fetching teacher marked attendances:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 // Fetch students for updating attendance
@@ -1386,32 +1394,63 @@ exports.updateAttendance = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // normalize date -> use day-range to avoid ms/tz mismatch
     const dateObj = new Date(date);
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const startOfDay = new Date(dateObj);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const endOfDay = new Date(dateObj);
+    endOfDay.setUTCHours(23, 59, 59, 999);
 
-    // 1️⃣ Check if attendance was marked within the last hour
-    const latestRecord = await Attendance.findOne({
+    // get teacher name (if exists) so we can match either markedBy = teacherId or teacherName
+    let teacherName = null;
+    try {
+      const teacher = await Teacher.findById(teacherId).lean();
+      if (teacher && teacher.name) teacherName = teacher.name;
+    } catch (e) {
+      // ignore lookup failure; we'll still try matching by teacherId
+      console.warn("Warning: could not fetch teacher name for updateAttendance", e && e.message);
+    }
+
+    // Find any Attendance doc that has a record for that date (within day range) and markedBy matching id or name
+    const matchMarkedBy = teacherName ? { $in: [teacherId, teacherName] } : teacherId;
+    const latestRecordDoc = await Attendance.findOne({
       subjectCode,
-      "records.date": dateObj,
-      "records.markedBy": teacherId,
+      records: {
+        $elemMatch: {
+          date: { $gte: startOfDay, $lte: endOfDay },
+          markedBy: matchMarkedBy,
+        },
+      },
     }).lean();
 
-    if (!latestRecord) {
+    if (!latestRecordDoc) {
       return res.status(404).json({ message: "No attendance found for update" });
     }
 
-    const recordDate = latestRecord.records.find(
-      r => r.date.toISOString() === dateObj.toISOString() && r.markedBy === teacherId
-    )?.date;
+    // Find the exact record inside the doc (matching both date range and markedBy)
+    const matchingRecord = latestRecordDoc.records.find(r => {
+      const rDate = new Date(r.date);
+      const withinDay = rDate >= startOfDay && rDate <= endOfDay;
+      const markedByMatches = teacherName ? (r.markedBy === teacherId || r.markedBy === teacherName) : r.markedBy === teacherId;
+      return withinDay && markedByMatches;
+    });
 
-    if (!recordDate || recordDate < oneHourAgo) {
+    if (!matchingRecord) {
+      // defensive fallback
+      return res.status(404).json({ message: "No attendance record found for that teacher/date" });
+    }
+
+    // enforce update window (1 hour limit from when it was marked)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000 * 24 ); // 24 hours
+    const recordDate = new Date(matchingRecord.date);
+    if (recordDate < oneHourAgo) {
       return res.status(403).json({ message: "Update window expired (1 hour limit)" });
     }
 
-    // 2️⃣ Update attendance records for provided students
+    // 2️⃣ Update attendance records for provided students (within same date)
     for (const upd of updates) {
       await Attendance.updateOne(
-        { studentId: upd.studentId, subjectCode, "records.date": dateObj },
+        { studentId: upd.studentId, subjectCode, "records.date": { $gte: startOfDay, $lte: endOfDay } },
         { $set: { "records.$.present": upd.present } },
         { session }
       );
@@ -1428,3 +1467,4 @@ exports.updateAttendance = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
