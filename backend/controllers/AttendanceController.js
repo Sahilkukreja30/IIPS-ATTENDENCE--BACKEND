@@ -434,14 +434,16 @@ exports.submitAttendance = async (req, res) => {
                   records: {
                     date: new Date(date),
                     present: r.present,
-                    markedBy: teacherName, // ✅ store per record
+                    markedBy: teacherName,// ✅ store per record
+                    markedAt: new Date(),// ✅ timestamp for each record
+
                   },
                 },
               },
             },
           }))
       );
-
+    console.log('Attendance Ops:', Date.now());
     if (attendanceOps.length > 0) {
       await Attendance.bulkWrite(attendanceOps, { session });
     }
@@ -627,7 +629,7 @@ exports.getStudentAttendanceDetail = async (req, res) => {
       .map(record => ({
         date: record.date,
         present: record.present,
-        markedBy: record.markedBy || "-"   
+        markedBy: record.markedBy || "-"
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -635,38 +637,38 @@ exports.getStudentAttendanceDetail = async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching student attendance details:', error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: 'Server error',
       error: error.message
     });
   }
 };
 
-  
-  // Get student information
-  exports.getStudentById = async (req, res) => {
-    try {
-      const { id } = req.params;
-      
-      const student = await Student.findById(id).select('-password'); // Exclude password
-      
-      if (!student) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-      
-      return res.status(200).json(student);
-    } catch (error) {
-      console.error('Error fetching student information:', error);
-      return res.status(500).json({ message: 'Server error' });
+
+// Get student information
+exports.getStudentById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const student = await Student.findById(id).select('-password'); // Exclude password
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
     }
-  };
+
+    return res.status(200).json(student);
+  } catch (error) {
+    console.error('Error fetching student information:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
 
 // Controller to send low attendance notifications
 // Controller to send low attendance notifications
 exports.sendLowAttendanceNotifications = async (req, res) => {
   try {
     const { attendanceSummary, threshold } = req.body;
-    
+
     if (!attendanceSummary || !threshold) {
       return res.status(400).json({ message: 'Missing required data' });
     }
@@ -678,9 +680,9 @@ exports.sendLowAttendanceNotifications = async (req, res) => {
     });
 
     if (lowAttendanceStudents.length === 0) {
-      return res.status(200).json({ 
-        message: 'No students found below the threshold', 
-        sentCount: 0 
+      return res.status(200).json({
+        message: 'No students found below the threshold',
+        sentCount: 0
       });
     }
 
@@ -740,43 +742,43 @@ exports.sendLowAttendanceNotifications = async (req, res) => {
   }
 };
 
-  
-  // Calculate how many consecutive classes a student needs to attend to reach the threshold
-  function calculateClassesNeeded(present, total, threshold) {
-    const currentPercentage = (present / total) * 100;
-    
-    if (currentPercentage >= threshold) return 0;
-    
-    let additionalClasses = 0;
-    let newTotal = total;
-    let newPresent = present;
-    
-    while ((newPresent / newTotal) * 100 < threshold) {
-      additionalClasses++;
-      newPresent++;
-      newTotal++;
-    }
-    
-    return additionalClasses;
+
+// Calculate how many consecutive classes a student needs to attend to reach the threshold
+function calculateClassesNeeded(present, total, threshold) {
+  const currentPercentage = (present / total) * 100;
+
+  if (currentPercentage >= threshold) return 0;
+
+  let additionalClasses = 0;
+  let newTotal = total;
+  let newPresent = present;
+
+  while ((newPresent / newTotal) * 100 < threshold) {
+    additionalClasses++;
+    newPresent++;
+    newTotal++;
   }
-  
-  // Function to send the low attendance email
-  async function sendLowAttendanceEmail(
-    email, 
-    studentName, 
-    rollNumber, 
-    subject, 
-    currentPercentage, 
-    threshold, 
-    gap, 
-    present, 
-    total,
-    classesNeeded
-  ) {
-    // Format the email with HTML for better readability
-    const emailSubject = `⚠️ IMPORTANT: Low Attendance Warning for ${subject}`;
-    
-    const emailHtml = `
+
+  return additionalClasses;
+}
+
+// Function to send the low attendance email
+async function sendLowAttendanceEmail(
+  email,
+  studentName,
+  rollNumber,
+  subject,
+  currentPercentage,
+  threshold,
+  gap,
+  present,
+  total,
+  classesNeeded
+) {
+  // Format the email with HTML for better readability
+  const emailSubject = `⚠️ IMPORTANT: Low Attendance Warning for ${subject}`;
+
+  const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
         <div style="background-color: #f8d7da; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 5px solid #dc3545;">
           <h2 style="color: #721c24; margin-top: 0;">Low Attendance Alert</h2>
@@ -814,19 +816,19 @@ exports.sendLowAttendanceNotifications = async (req, res) => {
         </div>
       </div>
     `;
-    
-    try {
-      await emailService.sendAttendanceEmail(
-        email,
-        emailSubject,
-        emailHtml
-      );
-      return true;
-    } catch (error) {
-      console.error('Error sending attendance email:', error);
-      throw error;
-    }
+
+  try {
+    await emailService.sendAttendanceEmail(
+      email,
+      emailSubject,
+      emailHtml
+    );
+    return true;
+  } catch (error) {
+    console.error('Error sending attendance email:', error);
+    throw error;
   }
+}
 
 // delete attendance (optimized)
 exports.deleteAttendance = async (req, res) => {
@@ -1212,3 +1214,257 @@ exports.markSingleAttendance = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+// Get attendances marked by a specific teacher
+// paste/replace this in AttendanceController.js (replace existing getTeacherMarkedAttendances)
+exports.getTeacherMarkedAttendances = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 12;
+    const skip = (page - 1) * limit;
+
+    const { teacherId } = req.params;
+    if (!teacherId) return res.status(400).json({ message: "teacherId is required" });
+
+    const teacher = await Teacher.findById(teacherId).lean();
+    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+
+    const hasAllAccess = teacher.subjectAccess.some(s => s.subjectCode === "all");
+    const allowedSubjects = teacher.subjectAccess.map(s => s.subjectCode);
+
+    // Build initial match stage (filter by subjectCode if teacher doesn't have all access)
+    const initialMatch = {};
+    if (!hasAllAccess) {
+      initialMatch.subjectCode = { $in: allowedSubjects };
+    }
+
+    // We want to group by subjectCode + date (same as before) and then sort by date desc.
+    const basePipeline = [
+      { $match: initialMatch },
+      { $unwind: "$records" },
+      {
+        $match: hasAllAccess
+          ? {} // no-op match
+          : { "records.markedBy": teacher.name }
+      },
+      {
+        $group: {
+          _id: { subjectCode: "$subjectCode", date: "$records.date" },
+          totalStudents: { $sum: 1 },
+          presentCount: { $sum: { $cond: [{ $eq: ["$records.present", true] }, 1, 0] } },
+          absentCount: { $sum: { $cond: [{ $eq: ["$records.present", false] }, 1, 0] } },
+          markedAt: { $first: "$records.markedAt" },
+          markedBy: { $first: "$records.markedBy" },
+        }
+      },
+      {
+        $lookup: {
+          from: "subjects",
+          localField: "_id.subjectCode",
+          foreignField: "Sub_Code",
+          as: "subjectInfo"
+        }
+      },
+      { $unwind: { path: "$subjectInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "courses",
+          localField: "subjectInfo.Course_ID",
+          foreignField: "Course_ID",
+          as: "courseInfo"
+        }
+      },
+      { $unwind: { path: "$courseInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          subjectCode: "$_id.subjectCode",
+          subjectName: "$subjectInfo.Sub_Name",
+          courseId: "$subjectInfo.Course_ID",
+          courseName: "$courseInfo.Course_Name",
+          semId: "$subjectInfo.Sem_Id",
+          date: "$_id.date",
+          presentCount: 1,
+          absentCount: 1,
+          totalStudents: 1,
+          markedAt: 1,
+          markedBy: 1
+        }
+      },
+      { $sort: { date: -1, markedAt: -1 } }
+    ];
+
+    // Use facet to get both paginated results and total count in one DB call
+    const facetPipeline = [
+      {
+        $facet: {
+          paginatedResults: [
+            { $skip: skip },
+            { $limit: limit }
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
+        }
+      }
+    ];
+
+    const agg = await Attendance.aggregate([...basePipeline, ...facetPipeline]);
+
+    const paginated = (agg[0] && agg[0].paginatedResults) || [];
+    const totalCount = (agg[0] && agg[0].totalCount && agg[0].totalCount[0] && agg[0].totalCount[0].count) || 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
+    const now = new Date();
+    const enhanced = paginated.map(r => {
+      const diffMs = now - new Date(r.markedAt);
+      const canUpdate = diffMs <= 6 * 60 * 60 * 1000 * 24; // 6 hour window
+      return { ...r, canUpdate };
+    });
+
+    return res.status(200).json({
+      teacher: teacher.name,
+      hasAllAccess,
+      attendances: enhanced,
+      page,
+      totalPages,
+      totalCount,
+      limit
+    });
+  } catch (error) {
+    console.error("Error fetching teacher marked attendances:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+
+// Fetch students for updating attendance
+exports.fetchStudentsForUpdate = async (req, res) => {
+  try {
+    const { subjectCode, date } = req.params;
+    console.log('Fetch students for update:', { subjectCode, date });
+
+    if (!subjectCode || !date) {
+      return res.status(400).json({ message: "subjectCode and date are required" });
+    }
+
+    const inputDate = new Date(date);
+    const startOfDay = new Date(inputDate);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const endOfDay = new Date(inputDate);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+
+    const docs = await Attendance.find({
+      subjectCode,
+      records: {
+        $elemMatch: { date: { $gte: startOfDay, $lte: endOfDay } } // add session: sessionId if needed
+      }
+    }).populate("studentId", "fullName rollNumber");
+
+    const students = docs.map(doc => {
+      // find the specific record inside the array (if multiple exist you'll get the first — adjust as needed)
+      const matchingRecord = doc.records.find(r => (r.date >= startOfDay && r.date <= endOfDay));
+      return {
+        studentId: doc.studentId._id,
+        fullName: doc.studentId.fullName,
+        rollNumber: doc.studentId.rollNumber,
+        present: matchingRecord ? matchingRecord.present : null,
+      };
+    });
+
+
+    console.log('Fetched records for update:', students.length);
+    return res.status(200).json({ students });
+
+  } catch (error) {
+    console.error("Error fetching students for update:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Update attendance records
+exports.updateAttendance = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { teacherId, subjectCode, date, updates } = req.body;
+
+    if (!teacherId || !subjectCode || !date || !updates) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // normalize date -> use day-range to avoid ms/tz mismatch
+    const dateObj = new Date(date);
+    const startOfDay = new Date(dateObj);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const endOfDay = new Date(dateObj);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+
+    // get teacher name (if exists) so we can match either markedBy = teacherId or teacherName
+    let teacherName = null;
+    try {
+      const teacher = await Teacher.findById(teacherId).lean();
+      if (teacher && teacher.name) teacherName = teacher.name;
+    } catch (e) {
+      // ignore lookup failure; we'll still try matching by teacherId
+      console.warn("Warning: could not fetch teacher name for updateAttendance", e && e.message);
+    }
+
+    // Find any Attendance doc that has a record for that date (within day range) and markedBy matching id or name
+    const matchMarkedBy = teacherName ? { $in: [teacherId, teacherName] } : teacherId;
+    const latestRecordDoc = await Attendance.findOne({
+      subjectCode,
+      records: {
+        $elemMatch: {
+          date: { $gte: startOfDay, $lte: endOfDay },
+          markedBy: matchMarkedBy,
+        },
+      },
+    }).lean();
+
+    if (!latestRecordDoc) {
+      return res.status(404).json({ message: "No attendance found for update" });
+    }
+
+    // Find the exact record inside the doc (matching both date range and markedBy)
+    const matchingRecord = latestRecordDoc.records.find(r => {
+      const rDate = new Date(r.date);
+      const withinDay = rDate >= startOfDay && rDate <= endOfDay;
+      const markedByMatches = teacherName ? (r.markedBy === teacherId || r.markedBy === teacherName) : r.markedBy === teacherId;
+      return withinDay && markedByMatches;
+    });
+
+    if (!matchingRecord) {
+      // defensive fallback
+      return res.status(404).json({ message: "No attendance record found for that teacher/date" });
+    }
+
+    // enforce update window (1 hour limit from when it was marked)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000 * 24 ); // 24 hours
+    const recordDate = new Date(matchingRecord.date);
+    if (recordDate < oneHourAgo) {
+      return res.status(403).json({ message: "Update window expired (1 hour limit)" });
+    }
+
+    // 2️⃣ Update attendance records for provided students (within same date)
+    for (const upd of updates) {
+      await Attendance.updateOne(
+        { studentId: upd.studentId, subjectCode, "records.date": { $gte: startOfDay, $lte: endOfDay } },
+        { $set: { "records.$.present": upd.present } },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({ message: "Attendance updated successfully" });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error updating attendance:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
