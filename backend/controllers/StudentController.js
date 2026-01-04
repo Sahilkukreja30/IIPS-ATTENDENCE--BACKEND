@@ -202,3 +202,165 @@ exports.deleteStudent = async (req, res) => {
     res.status(500).json({ message: "Failed to delete student" });
   }
 };
+
+
+// ---------------- PROMOTE ----------------
+// ===================== PROMOTE STUDENTS TO NEXT SEMESTER =====================
+exports.promoteStudentsToNextSemester = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { studentIds, promoteToNextYear = false } = req.body;
+
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        message: "studentIds must be a non-empty array"
+      });
+    }
+
+    // Fetch students in one go
+    const students = await Student.find({
+      _id: { $in: studentIds }
+    }).session(session);
+
+    if (!students.length) {
+      return res.status(404).json({
+        message: "No valid students found"
+      });
+    }
+
+    const promoted = [];
+    const skipped = [];
+
+    for (const student of students) {
+      // Fetch course to check max semester
+      const course = await Course.findOne(
+        { Course_Id: student.courseId },
+        { No_of_Sem: 1 }
+      ).session(session);
+
+      if (!course) {
+        skipped.push({
+          studentId: student._id,
+          reason: "Course not found"
+        });
+        continue;
+      }
+
+      const currentSem = parseInt(student.semId, 10);
+
+      if (isNaN(currentSem)) {
+        skipped.push({
+          studentId: student._id,
+          reason: "Invalid semester value"
+        });
+        continue;
+      }
+
+      // Already in final semester
+      if (currentSem >= course.No_of_Sem) {
+        skipped.push({
+          studentId: student._id,
+          reason: "Already in final semester"
+        });
+        continue;
+      }
+
+      const nextSem = (currentSem + 1).toString();
+
+      const updatePayload = {
+        semId: nextSem
+      };
+
+      // Optional academic year promotion
+      if (promoteToNextYear === true) {
+        const [startYear] = student.academicYear.split("-");
+        const nextStart = parseInt(startYear, 10) + 1;
+        updatePayload.academicYear = `${nextStart}-${(nextStart + 1)
+          .toString()
+          .slice(-2)}`;
+      }
+
+      await Student.updateOne(
+        { _id: student._id },
+        { $set: updatePayload },
+        { session }
+      );
+
+      promoted.push({
+        studentId: student._id,
+        fromSem: student.semId,
+        toSem: nextSem
+      });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "Student promotion completed",
+      summary: {
+        totalSelected: studentIds.length,
+        promotedCount: promoted.length,
+        skippedCount: skipped.length
+      },
+      promoted,
+      skipped
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Promotion error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to promote students",
+      error: error.message
+    });
+  }
+};
+
+// ===================== ROLLBACK STUDENT PROMOTION =====================
+exports.rollbackStudentPromotion = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { rollbackData } = req.body;
+
+    if (!Array.isArray(rollbackData) || rollbackData.length === 0) {
+      return res.status(400).json({
+        message: "rollbackData must be a non-empty array"
+      });
+    }
+
+    for (const entry of rollbackData) {
+      await Student.updateOne(
+        { _id: entry.studentId },
+        { $set: { semId: entry.fromSem } },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "Rollback completed successfully"
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Rollback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Rollback failed",
+      error: error.message
+    });
+  }
+};
