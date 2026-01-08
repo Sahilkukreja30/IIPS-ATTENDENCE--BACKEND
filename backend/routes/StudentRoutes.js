@@ -1,5 +1,5 @@
 const express = require("express");
-const { getAllStudents, createStudent, getStudents, getStudentById, updateStudent, deleteStudent, promoteStudentsToNextSemester, rollbackStudentPromotion } = require("../controllers/StudentController");
+const { getAllStudents, createStudent, getStudents, getStudentById, updateStudent, deleteStudent, promoteStudentsToNextSemester, rollbackStudents } = require("../controllers/StudentController");
 const router = express.Router();
 
 
@@ -12,7 +12,7 @@ router.delete("/delete/:id", deleteStudent);
 router.post("/students/promote", promoteStudentsToNextSemester);
 router.post(
     "/students/rollback-promotion",
-    rollbackStudentPromotion
+    rollbackStudents
 );
 
 
