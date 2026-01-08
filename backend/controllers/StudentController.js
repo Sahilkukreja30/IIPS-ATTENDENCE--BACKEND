@@ -23,7 +23,7 @@ const convertEmptyToNull = (value) => {
 // Helper function to process student data
 const processStudentData = (data) => {
   const processed = {};
-  
+
   // Required fields
   if (data.rollNumber !== undefined) {
     processed.rollNumber = data.rollNumber ? data.rollNumber.toUpperCase() : null;
@@ -37,7 +37,7 @@ const processStudentData = (data) => {
   if (data.semId !== undefined) {
     processed.semId = data.semId || null;
   }
-  
+
   // Optional fields
   if (data.email !== undefined) {
     processed.email = convertEmptyToNull(data.email);
@@ -59,7 +59,7 @@ const processStudentData = (data) => {
       processed.specializations = data.specializations;
     }
   }
-  
+
   return processed;
 };
 
@@ -110,8 +110,8 @@ exports.createStudent = async (req, res) => {
   } catch (err) {
     console.error("Create error:", err);
     if (err.name === 'ValidationError') {
-      return res.status(400).json({ 
-        message: "Validation error", 
+      return res.status(400).json({
+        message: "Validation error",
         details: Object.keys(err.errors).map(key => ({
           field: key,
           message: err.errors[key].message
@@ -178,8 +178,8 @@ exports.updateStudent = async (req, res) => {
   } catch (err) {
     console.error("Update error:", err);
     if (err.name === 'ValidationError') {
-      return res.status(400).json({ 
-        message: "Validation error", 
+      return res.status(400).json({
+        message: "Validation error",
         details: Object.keys(err.errors).map(key => ({
           field: key,
           message: err.errors[key].message
@@ -202,3 +202,243 @@ exports.deleteStudent = async (req, res) => {
     res.status(500).json({ message: "Failed to delete student" });
   }
 };
+
+
+// ===================== PROMOTE STUDENTS TO NEXT SEMESTER =====================
+exports.promoteStudentsToNextSemester = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { studentIds } = req.body;
+
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        message: "studentIds must be a non-empty array",
+      });
+    }
+
+    const students = await Student.find({
+      _id: { $in: studentIds },
+    }).session(session);
+
+    if (!students.length) {
+      return res.status(404).json({ message: "No valid students found" });
+    }
+
+    const promoted = [];
+    const skipped = [];
+
+    for (const student of students) {
+      const course = await Course.findOne(
+        { Course_Id: student.courseId },
+        { No_of_Sem: 1 }
+      ).session(session);
+
+      if (!course) {
+        skipped.push({ studentId: student._id, reason: "Course not found" });
+        continue;
+      }
+
+      const currentSem = parseInt(student.semId, 10);
+      if (isNaN(currentSem)) {
+        skipped.push({ studentId: student._id, reason: "Invalid semester" });
+        continue;
+      }
+
+      if (currentSem >= course.No_of_Sem) {
+        skipped.push({ studentId: student._id, reason: "Final semester" });
+        continue;
+      }
+
+      const nextSem = currentSem + 1;
+
+      let nextAcademicYear = student.academicYear;
+
+      // 🔥 EVEN → ODD ⇒ academic year changes
+      if (currentSem % 2 === 0) {
+        const [start] = student.academicYear.split("-");
+        const newStart = parseInt(start, 10) + 1;
+        nextAcademicYear = `${newStart}-${(newStart + 1)
+          .toString()
+          .slice(-2)}`;
+      }
+
+      await Student.updateOne(
+        { _id: student._id },
+        {
+          $set: {
+            semId: nextSem.toString(),
+            academicYear: nextAcademicYear,
+          },
+        },
+        { session }
+      );
+
+      promoted.push({
+        studentId: student._id,
+        fromSem: currentSem,
+        toSem: nextSem,
+        academicYear: nextAcademicYear,
+      });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "Students promoted successfully",
+      summary: {
+        requested: studentIds.length,
+        promoted: promoted.length,
+        skipped: skipped.length,
+      },
+      promoted,
+      skipped,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Promotion error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Promotion failed",
+      error: error.message,
+    });
+  }
+};
+// ===================== ROLLBACK STUDENT PROMOTION =====================
+const Attendance = require("../models/Attendance");
+
+// ===================== MANUAL ROLLBACK (ADMIN OVERRIDE) =====================
+exports.rollbackStudents = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { studentIds, resetAttendance = false } = req.body;
+
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        message: "studentIds must be a non-empty array"
+      });
+    }
+
+    const students = await Student.find({
+      _id: { $in: studentIds }
+    }).session(session);
+
+    const rolledBack = [];
+    const skipped = [];
+
+    for (const student of students) {
+      const currentSem = parseInt(student.semId, 10);
+
+      if (isNaN(currentSem)) {
+        skipped.push({
+          studentId: student._id,
+          reason: "Invalid semester value"
+        });
+        continue;
+      }
+
+      const updatePayload = {};
+
+      // ===================== CASE 1: RESET ATTENDANCE =====================
+      if (resetAttendance === true) {
+        // sem remains SAME
+        // academicYear ALWAYS increments by 1
+        console.log(resetAttendance);
+        
+        const [startYear] = student.academicYear.split("-");
+        const nextStart = parseInt(startYear, 10) + 1;
+        console.log(nextStart);
+        
+        updatePayload.academicYear = `${nextStart}-${(nextStart + 1)
+          .toString()
+          .slice(-2)}`;
+
+        // semId unchanged
+
+        rolledBack.push({
+          studentId: student._id,
+          sem: student.semId,
+          academicYearFrom: student.academicYear,
+          academicYearTo: updatePayload.academicYear,
+          type: "RESET_YEAR_ONLY"
+        });
+      }
+
+      // ===================== CASE 2: NORMAL ROLLBACK =====================
+      else {
+        if (currentSem <= 1) {
+          skipped.push({
+            studentId: student._id,
+            reason: "Already in first semester"
+          });
+          continue;
+        }
+
+        const previousSem = (currentSem - 1).toString();
+        updatePayload.semId = previousSem;
+
+        // academicYear decreases ONLY if crossing year boundary (odd → even logic)
+        // example: sem 3 → sem 2 (same academic year)
+        // example: sem 2 → sem 1 (previous academic year)
+
+        if (currentSem % 2 === 0) {
+          const [startYear] = student.academicYear.split("-");
+          const prevStart = parseInt(startYear, 10) - 1;
+
+          updatePayload.academicYear = `${prevStart}-${(prevStart + 1)
+            .toString()
+            .slice(-2)}`;
+        }
+
+        rolledBack.push({
+          studentId: student._id,
+          fromSem: student.semId,
+          toSem: previousSem,
+          academicYearFrom: student.academicYear,
+          academicYearTo: updatePayload.academicYear || student.academicYear,
+          type: "NORMAL_ROLLBACK"
+        });
+      }
+
+      await Student.updateOne(
+        { _id: student._id },
+        { $set: updatePayload },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "Rollback completed successfully",
+      summary: {
+        requested: studentIds.length,
+        rolledBack: rolledBack.length,
+        skipped: skipped.length
+      },
+      rolledBack,
+      skipped
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Rollback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Rollback failed",
+      error: error.message
+    });
+  }
+};
+
+
