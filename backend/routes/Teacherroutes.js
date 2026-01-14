@@ -24,6 +24,7 @@ const {
 const { uploadStudentsFromCSV, uploadCoursesFromCSV, uploadSubjectsFromCSV, uploadTeachersFromCSV, uploadFacultySubjectsFromCSV } = require("../controllers/FeedStudents");
 const { getAllUnmarkedAttendanceReport, getAttendanceByCourseAndSemesterExcel } = require("../controllers/ReportController");
 const verifyToken = require("../middleware/verifyToken");
+const { removeSubjectAccessExceptOne } = require("../controllers/TeacherController");
 const { deleteAttendance, mergeAttendance, updateAttendance } = require("../controllers/AttendanceController");
 const router = express.Router();
 
@@ -55,6 +56,7 @@ router.get("/:id",verifyToken, getTeacherById);
 router.put("/:id",verifyToken, updateTeacher);
 router.put("/:id/password",verifyToken, updateTeacherPassword);
 router.delete("/:id",verifyToken, deleteTeacher);
+router.post("/removeSubjectAccessExceptOne", verifyToken, removeSubjectAccessExceptOne);
 
 
 //summary

@@ -9,6 +9,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const secret = process.env.SECRET_KEY || "your_secret_key";
+const mongoose = require("mongoose");
 
 const signUp = async (req, res) => {
   const { name, email, mobileNumber, password } = req.body;
@@ -488,6 +489,56 @@ const getAllSubjects = async (req, res) => {
   }
 };
 
+const removeSubjectAccessExceptOne = async (req, res) => {
+  try {
+    const { excludeTeacherId } = req.body;
+
+    if (!excludeTeacherId) {
+      return res.status(400).json({
+        success: false,
+        message: "excludeTeacherId is required"
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(excludeTeacherId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid excludeTeacherId"
+      });
+    }
+
+    // ✅ Check excluded teacher exists
+    const excludedTeacher = await Teacher.findById(excludeTeacherId);
+    if (!excludedTeacher) {
+      return res.status(404).json({
+        success: false,
+        message: "Excluded teacher not found"
+      });
+    }
+
+    // ✅ Remove subject access from all OTHER teachers
+    const result = await Teacher.updateMany(
+      { _id: { $ne: excludeTeacherId } },
+      { $set: { subjectAccess: [] } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Subject access removed from all teachers except selected one",
+      summary: {
+        excludedTeacher: excludedTeacher.name,
+        teachersUpdated: result.modifiedCount
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error removing subject access",
+      error: error.message
+    });
+  }
+};
 
 
 module.exports = {
@@ -506,5 +557,6 @@ module.exports = {
   updateTeacher,
   updateTeacherPassword,
   deleteTeacher,
-  getAllSubjects
+  getAllSubjects,
+  removeSubjectAccessExceptOne
 };
