@@ -11,14 +11,14 @@ const { removeExpiredSessions } = require("./utils/sessionCleanup");
 
 
 const app = express();
+app.set("trust proxy", 1);
 
 // Add CORS middleware
 app.use(
   cors({
-    origin: function (origin, callback) {
-      callback(null, true); // Allow all origins
-    },
-    credentials: true, // Allow cookies to be sent
+    origin: "https://iips-attendance-frontend.vercel.app", // Your specific Frontend URL
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
   })
 );
 
@@ -35,10 +35,14 @@ mongoose
 
 app.use(
   session({
-    secret: "your-secret-key",
+    secret: "your-secret-key", 
     resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false }, 
+    saveUninitialized: false, 
+    cookie: {
+      secure: true, 
+      sameSite: "none", 
+      maxAge: 1000 * 60 * 60 * 24, 
+    },
   })
 );
 
