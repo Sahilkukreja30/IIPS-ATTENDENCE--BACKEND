@@ -348,9 +348,16 @@ exports.getStudentsByCourseAndSemester = async (req, res) => {
 
 // Submit new attendance
 const getCurrentAcademicYear = () => {
-  const year = new Date().getFullYear();
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0 = Jan
+
+  if (month <= 3) {
+    return `${year - 1}-${year.toString().slice(-2)}`;
+  }
   return `${year}-${(year + 1).toString().slice(-2)}`;
 };
+
 
 exports.submitAttendance = async (req, res) => {
   const session = await mongoose.startSession();
@@ -414,9 +421,9 @@ exports.submitAttendance = async (req, res) => {
       .filter(r => validStudentIds.has(r.studentId.toString()))
       .map(r => ({
         updateOne: {
-          filter: { studentId: r.studentId, subjectCode },
+          filter: { studentId: r.studentId, subjectCode, currAcademicYear: academicYear },
           update: {
-            $setOnInsert: { studentId: r.studentId, subjectCode },
+            $setOnInsert: { studentId: r.studentId, subjectCode, currAcademicYear: academicYear },
             // Prevent duplicate date: pull existing record for same date
             $pull: { records: { date: new Date(date) } },
           },
@@ -428,7 +435,7 @@ exports.submitAttendance = async (req, res) => {
           .filter(r => validStudentIds.has(r.studentId.toString()))
           .map(r => ({
             updateOne: {
-              filter: { studentId: r.studentId, subjectCode },
+              filter: { studentId: r.studentId, subjectCode, currAcademicYear: academicYear },
               update: {
                 $push: {
                   records: {
@@ -447,21 +454,43 @@ exports.submitAttendance = async (req, res) => {
     if (attendanceOps.length > 0) {
       await Attendance.bulkWrite(attendanceOps, { session });
     }
+    const summaryOps = [];
 
-    // 4️⃣ Bulk insert/update AttendanceSummary
-    const summaryOps = attendance
-      .filter(r => validStudentIds.has(r.studentId.toString()))
-      .map(r => ({
+    for (const r of attendance) {
+      if (!validStudentIds.has(r.studentId.toString())) continue;
+
+      const alreadyMarked = await Attendance.findOne({
+        studentId: r.studentId,
+        subjectCode,
+        currAcademicYear: academicYear,
+        "records.date": new Date(date),
+      }).session(session);
+
+      // ❌ Skip summary update if already marked
+      if (alreadyMarked) continue;
+
+      summaryOps.push({
         updateOne: {
           filter: { studentId: r.studentId, courseId, semId, subjectCode, academicYear },
           update: {
-            $inc: { totalClasses: 1, attendedClasses: r.present ? 1 : 0 },
+            $inc: {
+              totalClasses: 1,
+              attendedClasses: r.present ? 1 : 0,
+            },
             $set: { lastUpdated: new Date() },
-            $setOnInsert: { studentId: r.studentId, courseId, semId, subjectCode, academicYear },
+            $setOnInsert: {
+              studentId: r.studentId,
+              courseId,
+              semId,
+              subjectCode,
+              academicYear,
+            },
           },
           upsert: true,
         },
-      }));
+      });
+    }
+
 
     if (summaryOps.length > 0) {
       await AttendanceSummary.bulkWrite(summaryOps, { session });
@@ -484,63 +513,107 @@ exports.submitAttendance = async (req, res) => {
 // Get attendance by course, semester, subject, and academic year with optional filters
 exports.getAttendanceByCourseAndSubject = async (req, res) => {
   try {
-    const { course, semester, subject, academicYear, specialization, section, startDate, endDate } = req.body;
-    console.log('Query params:', { course, semester, subject, academicYear, specialization, section, startDate, endDate });
+    const {
+      course,
+      subject,
+      academicYear,
+      specialization,
+      section,
+      startDate,
+      endDate
+    } = req.body;
 
-    // Step 1: Build student query
-    const studentQuery = {
-      courseId: course,
-      semId: semester
-    };
-
-    if (specialization && specialization.trim() !== '') {
-      studentQuery.specializations = { $in: [specialization] };
-    }
-
-    if (section && section.trim() !== '') {
-      studentQuery.section = section;
-    }
-
-    console.log('Student query:', JSON.stringify(studentQuery));
-
-    // Step 2: Fetch students
-    const students = await Student.find(studentQuery);
-
-    if (students.length === 0) {
-      return res.status(404).json({
-        message: 'No students found for this course, semester, and filters',
-        filters: { course, semester, specialization, section }
+    if (!course || !subject || !academicYear) {
+      return res.status(400).json({
+        message: "course, subject and academicYear are required"
       });
     }
 
-    const studentIds = students.map(s => s._id);
+    /* -------------------------------------------------
+       STEP 1: Get attendance FIRST (source of truth)
+    --------------------------------------------------*/
+    const attendanceMatch = {
+      subjectCode: subject,
+      currAcademicYear: academicYear
+    };
 
-    // Step 3: Build aggregation pipeline
+    const attendanceDocs = await Attendance.find(attendanceMatch)
+      .select("studentId");
+
+    if (attendanceDocs.length === 0) {
+      return res.status(200).json({
+        students: [],
+        totalStudents: 0,
+        filters: { course, subject, academicYear }
+      });
+    }
+
+    const studentIds = attendanceDocs.map(a => a.studentId);
+
+    /* -------------------------------------------------
+       STEP 2: Fetch ONLY those students
+    --------------------------------------------------*/
+    const studentQuery = {
+      _id: { $in: studentIds },
+      courseId: course
+    };
+
+    if (specialization && specialization.trim() !== "") {
+      studentQuery.specializations = { $in: [specialization] };
+    }
+
+    if (section && section.trim() !== "") {
+      studentQuery.section = section;
+    }
+
+    const students = await Student.find(studentQuery);
+
+    if (students.length === 0) {
+      return res.status(200).json({
+        students: [],
+        totalStudents: 0,
+        filters: { course, subject, academicYear }
+      });
+    }
+
+    /* -------------------------------------------------
+       STEP 3: Aggregate attendance (counts)
+    --------------------------------------------------*/
     const pipeline = [
-      { $match: { studentId: { $in: studentIds }, subjectCode: subject } },
-      { $unwind: "$records" },
+      {
+        $match: {
+          studentId: { $in: studentIds },
+          subjectCode: subject,
+          currAcademicYear: academicYear
+        }
+      },
+      { $unwind: "$records" }
     ];
 
-    // Apply date filter if provided
+    // Optional date filter
     if (startDate || endDate) {
       const dateFilter = {};
       if (startDate) dateFilter.$gte = new Date(startDate);
       if (endDate) dateFilter.$lte = new Date(endDate);
+
       pipeline.push({ $match: { "records.date": dateFilter } });
     }
 
-    // Group by studentId and calculate totals
     pipeline.push({
       $group: {
         _id: "$studentId",
         total: { $sum: 1 },
-        attended: { $sum: { $cond: ["$records.present", 1, 0] } }
+        attended: {
+          $sum: { $cond: ["$records.present", 1, 0] }
+        }
       }
     });
 
     const aggregated = await Attendance.aggregate(pipeline);
 
-    // Step 4: Map aggregation results back to students
+    /* -------------------------------------------------
+       STEP 4: Map attendance to students
+    --------------------------------------------------*/
     const attendanceMap = new Map();
     aggregated.forEach(doc => {
       attendanceMap.set(doc._id.toString(), {
@@ -550,36 +623,50 @@ exports.getAttendanceByCourseAndSubject = async (req, res) => {
     });
 
     const attendanceSummaries = students.map(student => {
-      const summary = attendanceMap.get(student._id.toString()) || { attended: 0, total: 0 };
+      const summary =
+        attendanceMap.get(student._id.toString()) || { attended: 0, total: 0 };
+
       return {
         studentId: student._id,
         studentName: student.fullName,
         rollNumber: student.rollNumber,
         courseId: student.courseId,
-        semId: student.semId,
+        semId: student.semId, // current sem (for display only)
         specializations: student.specializations || [],
-        section: student.section || '',
+        section: student.section || "",
         subjectCode: subject,
         academicYear,
         classesAttended: summary.attended,
         totalClasses: summary.total,
-        attendancePercentage: summary.total > 0 ? Math.round((summary.attended / summary.total) * 100) : 0
+        attendancePercentage:
+          summary.total > 0
+            ? Math.round((summary.attended / summary.total) * 100)
+            : 0
       };
     });
 
     // Sort by roll number
-    attendanceSummaries.sort((a, b) => {
-      return a.rollNumber.localeCompare(b.rollNumber, undefined, { numeric: true });
-    });
+    attendanceSummaries.sort((a, b) =>
+      a.rollNumber.localeCompare(b.rollNumber, undefined, { numeric: true })
+    );
 
     return res.status(200).json({
       students: attendanceSummaries,
       totalStudents: attendanceSummaries.length,
-      filters: { course, semester, subject, academicYear, specialization, section, startDate, endDate }
+      filters: {
+        course,
+        subject,
+        academicYear,
+        specialization,
+        section,
+        startDate,
+        endDate
+      }
     });
+
   } catch (error) {
-    console.error('Error fetching attendance by course and subject:', error);
-    return res.status(500).json({ message: 'Server error' });
+    console.error("Error fetching attendance:", error);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -1441,7 +1528,7 @@ exports.updateAttendance = async (req, res) => {
     }
 
     // enforce update window (1 hour limit from when it was marked)
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000 * 24 ); // 24 hours
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000 * 24); // 24 hours
     const recordDate = new Date(matchingRecord.date);
     if (recordDate < oneHourAgo) {
       return res.status(403).json({ message: "Update window expired (1 hour limit)" });

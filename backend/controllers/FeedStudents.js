@@ -4,7 +4,15 @@ const fs = require('fs');
 const path = require('path');
 const Student = require('../models/Student');
 const Course = require('../models/Course');
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: "uploads/",
+    filename: (req, file, cb) => {
+      cb(null, Date.now() + "-" + file.originalname);
+    },
+  }),
+});
+
 const bcrypt = require("bcryptjs");
 const Subject = require('../models/Subject');
 const Teacher=require('../models/Teacher');
