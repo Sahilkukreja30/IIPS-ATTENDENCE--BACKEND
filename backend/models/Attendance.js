@@ -13,7 +13,7 @@ const attendanceSchema = new mongoose.Schema({
   currAcademicYear: {
     type: String,
     required: true,
-    default: "2025-26"
+    default: "2025-2026"
   },
   records: [
     {
