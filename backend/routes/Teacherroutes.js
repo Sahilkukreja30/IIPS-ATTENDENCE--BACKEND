@@ -52,14 +52,15 @@ router.post("/updateAttendance",verifyToken,updateAttendance)
 router.get("/getallsubjects",verifyToken, getAllSubjects);
 router.post("/create",verifyToken,createTeacher);
 router.get("/getall",verifyToken, getAllTeachers);
-router.get("/:id",verifyToken, getTeacherById);
-router.put("/:id",verifyToken, updateTeacher);
-router.put("/:id/password",verifyToken, updateTeacherPassword);
-router.delete("/:id",verifyToken, deleteTeacher);
+router.get('/getMissingSubjectSummary',verifyToken, getAllUnmarkedAttendanceReport);
 router.post("/removeSubjectAccessExceptOne", verifyToken, removeSubjectAccessExceptOne);
 
+router.get("/:id",verifyToken, getTeacherById);
+router.put("/:id/password",verifyToken, updateTeacherPassword);
+router.put("/:id",verifyToken, updateTeacher);
+router.delete("/:id",verifyToken, deleteTeacher);
 
 //summary
-router.get('/getMissingSubjectSummary',verifyToken, getAllUnmarkedAttendanceReport);
+
 
 module.exports = router;
