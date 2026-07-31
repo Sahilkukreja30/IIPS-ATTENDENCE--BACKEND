@@ -397,9 +397,10 @@ const getTeacherById = async (req, res) => {
   try {
     const teacher = await Teacher.findById(req.params.id).select("-password");
     if (!teacher) return res.status(404).json({ success: false, message: "Teacher not found" });
-
+    console.log("Teacher ID hit:", req.params.id);
     res.status(200).json({ success: true, teacher });
   } catch (error) {
+    console.log("Teacher ID hit:", req.params.id);
     res.status(500).json({ success: false, message: "Error fetching teacher", error: error.message });
   }
 };
@@ -521,7 +522,7 @@ const removeSubjectAccessExceptOne = async (req, res) => {
       { _id: { $ne: excludeTeacherId } },
       { $set: { subjectAccess: [] } }
     );
-
+    
     res.status(200).json({
       success: true,
       message: "Subject access removed from all teachers except selected one",

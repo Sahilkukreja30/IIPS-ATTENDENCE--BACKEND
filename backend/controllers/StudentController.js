@@ -256,9 +256,10 @@ exports.promoteStudentsToNextSemester = async (req, res) => {
       let nextAcademicYear = student.academicYear;
 
       // 🔥 EVEN → ODD ⇒ academic year changes
-      if (currentSem % 2 === 0) {
-        const [start] = student.academicYear.split("-");
-        const newStart = parseInt(start, 10) + 1;
+      if (nextSem % 2 !== 0) {
+        const [startYear] = student.academicYear.split("-");
+        const newStart = parseInt(startYear, 10) + 1;
+
         nextAcademicYear = `${newStart}-${(newStart + 1)
           .toString()
           .slice(-2)}`;
@@ -350,11 +351,11 @@ exports.rollbackStudents = async (req, res) => {
         // sem remains SAME
         // academicYear ALWAYS increments by 1
         console.log(resetAttendance);
-        
+
         const [startYear] = student.academicYear.split("-");
         const nextStart = parseInt(startYear, 10) + 1;
         console.log(nextStart);
-        
+
         updatePayload.academicYear = `${nextStart}-${(nextStart + 1)
           .toString()
           .slice(-2)}`;
