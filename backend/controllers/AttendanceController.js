@@ -705,6 +705,9 @@ exports.getStudentAttendanceDetail = async (req, res) => {
     if (startDate || endDate) {
       const from = startDate ? new Date(startDate) : new Date('1970-01-01');
       const to = endDate ? new Date(endDate) : new Date(); // current date if endDate is not provided
+      if (endDate) {
+        to.setUTCHours(23, 59, 59, 999);
+      }
 
       filteredRecords = filteredRecords.filter(record => {
         const recordDate = new Date(record.date);
@@ -1404,7 +1407,7 @@ exports.getTeacherMarkedAttendances = async (req, res) => {
     const now = new Date();
     const enhanced = paginated.map(r => {
       const diffMs = now - new Date(r.markedAt);
-      const canUpdate = diffMs <= 6 * 60 * 60 * 1000 * 24; // 6 hour window
+      const canUpdate = diffMs <= 6 * 60 * 60 * 1000; // 6 hour window
       return { ...r, canUpdate };
     });
 
@@ -1527,11 +1530,11 @@ exports.updateAttendance = async (req, res) => {
       return res.status(404).json({ message: "No attendance record found for that teacher/date" });
     }
 
-    // enforce update window (1 hour limit from when it was marked)
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000 * 24); // 24 hours
-    const recordDate = new Date(matchingRecord.date);
-    if (recordDate < oneHourAgo) {
-      return res.status(403).json({ message: "Update window expired (1 hour limit)" });
+    // enforce update window (6 hour limit from when it was marked)
+    const updateLimitWindow = new Date(Date.now() - 6 * 60 * 60 * 1000); // 6 hours
+    const markedAtDate = new Date(matchingRecord.markedAt || matchingRecord.date);
+    if (markedAtDate < updateLimitWindow) {
+      return res.status(403).json({ message: "Update window expired (6 hour limit)" });
     }
 
     // 2️⃣ Update attendance records for provided students (within same date)

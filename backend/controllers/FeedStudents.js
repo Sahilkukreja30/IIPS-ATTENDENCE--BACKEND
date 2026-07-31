@@ -52,15 +52,21 @@ exports.uploadStudentsFromCSV = [
     fs.createReadStream(filePath)
       .pipe(csvParser())
       .on('data', (row) => {
-        const normalize = (key) => key?.trim().toLowerCase();
+        const normalize = (key) => key?.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        const getField = (fieldName) => {
-          const key = Object.keys(row).find(k => normalize(k) === normalize(fieldName));
-          return key ? row[key] || null : null;
+        const getField = (...fieldNames) => {
+          for (const name of fieldNames) {
+            const target = normalize(name);
+            const key = Object.keys(row).find(k => normalize(k) === target);
+            if (key && row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "") {
+              return String(row[key]).trim();
+            }
+          }
+          return null;
         };
 
-        const rollNumber = (getField('Roll Number') || getField('Roll No.'))?.trim().toUpperCase();
-        const studentName = getField('Student Name')?.trim() || getField('Name')?.trim() || 'Unknown';
+        const rollNumber = getField('Roll Number', 'Roll No.', 'RollNo', 'Roll No', 'Roll_Number', 'Roll_No')?.toUpperCase();
+        const studentName = getField('Student Name', 'Name', 'StudentName', 'Full Name', 'FullName') || 'Unknown';
 
         if (!rollNumber) {
           console.warn('Missing roll number for row:', row);
@@ -83,16 +89,19 @@ exports.uploadStudentsFromCSV = [
           return; // Skip this student
         }
 
-        const specialization = getField('Specialization');
+        const specialization = getField('Specialization', 'Specialization_Name', 'Spec');
+        const courseId = getField('Course_Id', 'Course_ID', 'Course Id', 'Course ID', 'CourseId', 'Course');
+        const semId = getField('Sem_Id', 'Sem_ID', 'Sem Id', 'Sem ID', 'SemId', 'Semester', 'Sem');
+        const section = getField('section', 'Section');
 
         studentRows.push({
           rollNumber,
           fullName: studentName,
-          courseId: getField('Course_Id')?.trim(),
-          semId: getField('Sem_Id')?.trim(),
-          email: getField('Email')?.toLowerCase().trim() || null,
-          phoneNumber: getField('Phone')?.trim() || null,
-          section: getField('section')?.trim() || null,
+          courseId,
+          semId,
+          email: getField('Email', 'Email Address', 'EmailId')?.toLowerCase() || null,
+          phoneNumber: getField('Phone', 'Phone Number', 'Mobile', 'Mobile Number') || null,
+          section: section || null,
           academicYear: getCurrentAcademicYear(),
           specialization // singular input field
         });
