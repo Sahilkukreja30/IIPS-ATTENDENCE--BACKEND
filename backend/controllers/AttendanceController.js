@@ -307,7 +307,8 @@ exports.getStudentsByCourseAndSemester = async (req, res) => {
     // Step 2: Build query
     const query = {
       courseId: course.Course_Id,
-      semId: semester_id
+      semId: semester_id,
+      isPassedOut: { $ne: true }
     };
     if (specialization?.trim()) {
       query.specializations = specialization; // no need for $in if it's a single value

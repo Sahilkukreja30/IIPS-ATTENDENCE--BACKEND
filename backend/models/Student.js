@@ -43,6 +43,15 @@ specializations: {
   academicYear: {
     type: String,
     default: getCurrentAcademicYear
+  },
+  isPassedOut: {
+    type: Boolean,
+    default: false
+  },
+  status: {
+    type: String,
+    enum: ['ACTIVE', 'PASSED_OUT'],
+    default: 'ACTIVE'
   }
 }, { collection: 'Students' });
 
