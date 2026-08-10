@@ -395,14 +395,21 @@ exports.uploadTeachersFromCSV = [
       .pipe(csvParser())
       .on('data', (row) => {
         const normalize = (key) => key?.trim().toLowerCase();
-        const getField = (fieldName) => {
-          const key = Object.keys(row).find(k => normalize(k) === normalize(fieldName));
-          return key ? row[key]?.trim() || null : null;
+        const getField = (...fieldNames) => {
+          for (const name of fieldNames) {
+            const target = normalize(name);
+            const key = Object.keys(row).find(k => normalize(k) === target);
+            if (key && row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "") {
+              return String(row[key]).trim();
+            }
+          }
+          return null;
         };
 
-        const name = getField('name');
-        const email = getField('email');
+        const name = getField('name', 'teacher_name', 'teacherName');
+        const email = getField('email', 'email_address', 'emailAddress');
         const password = getField('password');
+        const faculty_id = getField('faculty_id', 'facultyId', 'Faculty ID', 'Faculty_Id');
 
         if (!name || !email || !password) {
           skippedTeachers.push({
@@ -413,7 +420,7 @@ exports.uploadTeachersFromCSV = [
           return;
         }
 
-        teachers.push({ name, email, password });
+        teachers.push({ name, email, password, faculty_id: faculty_id || undefined });
       })
       .on('end', async () => {
         let inserted = 0;
@@ -421,7 +428,7 @@ exports.uploadTeachersFromCSV = [
         let failed = 0;
         const insertedTeachers = [];
 
-        for (const { name, email, password } of teachers) {
+        for (const { name, email, password, faculty_id } of teachers) {
           try {
             const hashedPassword = await bcrypt.hash(password, 10);
             const existing = await Teacher.findOne({ email });
@@ -430,6 +437,14 @@ exports.uploadTeachersFromCSV = [
               // Update existing teacher
               existing.name = name;
               existing.password = hashedPassword;
+              if (faculty_id && faculty_id.trim()) {
+                existing.faculty_id = faculty_id.trim();
+              }
+              // Ensure subject access includes "all"
+              const hasAll = existing.subjectAccess.some(s => s.subjectCode === 'all');
+              if (!hasAll) {
+                existing.subjectAccess.push({ subjectCode: 'all' });
+              }
               await existing.save();
 
               inserted++;
@@ -437,12 +452,17 @@ exports.uploadTeachersFromCSV = [
               continue;
             }
 
-            const newTeacher = new Teacher({
+            const teacherData = {
               name,
               email,
-              mobileNumber: null,
               password: hashedPassword,
-            });
+              subjectAccess: [{ subjectCode: 'all' }],
+            };
+            if (faculty_id && faculty_id.trim()) {
+              teacherData.faculty_id = faculty_id.trim();
+            }
+
+            const newTeacher = new Teacher(teacherData);
 
             await newTeacher.save();
             inserted++;
@@ -538,9 +558,9 @@ exports.uploadFacultySubjectsFromCSV = [
             if (subCode) {
               const subCodes = subCode.split(",").map((c) => c.trim());
 
-              // update faculty_id if not already set
-              if (faculty_id && !teacher.faculty_id) {
-                teacher.faculty_id = faculty_id;
+              // update faculty_id if not already set and provided
+              if (faculty_id && faculty_id.trim() && !teacher.faculty_id) {
+                teacher.faculty_id = faculty_id.trim();
               }
 
               for (const code of subCodes) {
