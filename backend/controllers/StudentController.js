@@ -247,7 +247,24 @@ exports.promoteStudentsToNextSemester = async (req, res) => {
       }
 
       if (currentSem >= course.No_of_Sem) {
-        skipped.push({ studentId: student._id, reason: "Final semester" });
+        await Student.updateOne(
+          { _id: student._id },
+          {
+            $set: {
+              isPassedOut: true,
+              status: "PASSED_OUT",
+            },
+          },
+          { session }
+        );
+
+        promoted.push({
+          studentId: student._id,
+          fromSem: currentSem,
+          toSem: "PASSED_OUT",
+          academicYear: student.academicYear,
+          status: "PASSED_OUT",
+        });
         continue;
       }
 
@@ -344,7 +361,10 @@ exports.rollbackStudents = async (req, res) => {
         continue;
       }
 
-      const updatePayload = {};
+      const updatePayload = {
+        isPassedOut: false,
+        status: "ACTIVE"
+      };
 
       // ===================== CASE 1: RESET ATTENDANCE =====================
       if (resetAttendance === true) {

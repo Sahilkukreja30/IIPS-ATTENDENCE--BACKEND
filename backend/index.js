@@ -26,8 +26,28 @@ app.use(express.json());
 
 mongoose
   .connect(process.env.MONGODB_URL)
-  .then(() => {
+  .then(async () => {
     console.log("Connected to Database");
+    try {
+      const Teacher = require("./models/Teacher");
+      // Clean up existing documents with null or empty string faculty_id
+      await Teacher.updateMany(
+        { $or: [{ faculty_id: null }, { faculty_id: "" }] },
+        { $unset: { faculty_id: 1 } }
+      );
+      // Drop legacy non-sparse index if present
+      try {
+        await Teacher.collection.dropIndex("faculty_id_1");
+        console.log("Dropped legacy faculty_id_1 index");
+      } catch (e) {
+        // Index might not exist or already dropped
+      }
+      // Re-sync Mongoose schema indexes
+      await Teacher.syncIndexes();
+      console.log("Database indexes synchronized successfully");
+    } catch (err) {
+      console.error("Index cleanup error:", err.message);
+    }
   })
   .catch((error) => {
     console.error("Database connection failed:", error);

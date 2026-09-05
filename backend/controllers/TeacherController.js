@@ -322,8 +322,13 @@ const createTeacher = async (req, res) => {
     const { name, email, password, mobileNumber, faculty_id, subjectAccess } = req.body;
 
     // ✅ Check if teacher with email or faculty_id already exists
+    const checkCriteria = [{ email }];
+    if (faculty_id && typeof faculty_id === 'string' && faculty_id.trim()) {
+      checkCriteria.push({ faculty_id: faculty_id.trim() });
+    }
+
     const existingTeacher = await Teacher.findOne({
-      $or: [{ email }, { faculty_id }]
+      $or: checkCriteria
     });
 
     if (existingTeacher) {
@@ -345,16 +350,23 @@ const createTeacher = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // ✅ Convert subjectAccess array of strings -> array of objects
-    const formattedSubjects = subjectAccess.map(code => ({ subjectCode: code }));
+    const formattedSubjects = Array.isArray(subjectAccess) 
+      ? subjectAccess.map(code => ({ subjectCode: code }))
+      : [];
 
-    const teacher = new Teacher({
+    const teacherData = {
       name,
       email,
       password: hashedPassword,
-      mobileNumber,
-      faculty_id,
+      mobileNumber: mobileNumber || undefined,
       subjectAccess: formattedSubjects,
-    });
+    };
+
+    if (faculty_id && typeof faculty_id === 'string' && faculty_id.trim()) {
+      teacherData.faculty_id = faculty_id.trim();
+    }
+
+    const teacher = new Teacher(teacherData);
 
     await teacher.save();
 
@@ -417,9 +429,22 @@ const updateTeacher = async (req, res) => {
       ? subjectAccess.map(sub => ({ subjectCode: sub }))
       : [];
 
+    const updateData = {
+      name,
+      email,
+      mobileNumber: mobileNumber || undefined,
+      subjectAccess: formattedSubjectAccess
+    };
+
+    if (faculty_id && typeof faculty_id === 'string' && faculty_id.trim()) {
+      updateData.faculty_id = faculty_id.trim();
+    } else if (faculty_id === "" || faculty_id === null) {
+      updateData.$unset = { faculty_id: 1 };
+    }
+
     const teacher = await Teacher.findByIdAndUpdate(
       req.params.id,
-      { name, email, mobileNumber, faculty_id, subjectAccess: formattedSubjectAccess },
+      updateData,
       { new: true }
     ).select("-password");
 

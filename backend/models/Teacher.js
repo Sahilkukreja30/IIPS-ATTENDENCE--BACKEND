@@ -6,7 +6,7 @@ const teacherSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     mobileNumber: { type: String },
-    faculty_id: { type: String, unique: true, sparse: true, default: null },
+    faculty_id: { type: String, unique: true, sparse: true },
 
     otp: { type: String },
     otpExpiry: { type: Date },
